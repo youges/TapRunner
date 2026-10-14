@@ -1,0 +1,1 @@
+<resources><string name="app_name">TapRunner 连点器</string><string name="a11y_description">仅在你启动脚本后模拟点击、读取控件并在本地匹配截图。长按音量下 1.5 秒急停。应用不联网，不上传屏幕内容。</string><string name="coordinate_a11y_description">只按你设置的坐标执行点击、长按和滑动，用悬浮栏或通知停止。不读取页面控件，不截取屏幕，不监听音量键。</string></resources>

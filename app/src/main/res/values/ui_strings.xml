@@ -1,0 +1,20 @@
+<resources>
+    <string name="point_handle">点位 %1$d · %2$s</string>
+    <string name="step_number">%1$d</string>
+    <string name="step_title">%1$s %2$s</string>
+    <string name="node_priority">优先定位控件：%1$s</string>
+    <string name="child_step">步骤 %1$d · %2$s %3$s</string>
+    <string name="step_marked">步骤 %1$d 已标记（未保存）</string>
+    <string name="point_interval_hint">本点开始到下一点开始的间隔；拖动编号可以调整位置。</string>
+    <string name="test_title">TapRunner 真机测试台</string>
+    <string name="test_counter">已接收点击：%1$d</string>
+    <string name="test_target">测试点击目标</string>
+    <string name="test_description">只在此页面验证实际手势与接收次数。运行后可以暂停或停止；音量键急停需要高级识别服务。</string>
+    <string name="test_run_small">运行 100 次真实点击</string>
+    <string name="test_run_large">运行 10,000 次</string>
+    <string name="test_run_swipe">运行 10 次往返滑动</string>
+    <string name="test_scroll_title">滑动验证区域</string>
+    <string name="test_scroll_row">测试内容 %1$d · 仅在本页往返滑动</string>
+    <string name="test_stop">立即停止</string>
+    <string name="test_back">返回编辑器</string>
+</resources>
