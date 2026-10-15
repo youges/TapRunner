@@ -32,11 +32,13 @@ class OverlayController(private val service: RunnerService) {
     private var picker: View? = null
     private var capture: View? = null
     private var recordingBusy = false
+    private var gestureInFlight = false
     private var editor: FloatingEditor? = null
     private var markersJob: Job? = null
     private var closed = false
 
     init {
+        app.runtime.overlayGestureGate=::allowGestureThroughControls
         // Android 12+ uses window alpha to decide whether touches may pass through
         // application overlays, even when their canvas pixels are transparent.
         add(numbered, params(-1,-1).apply { flags=flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;alpha=.65f })
@@ -81,12 +83,13 @@ class OverlayController(private val service: RunnerService) {
         val updater=FrameWindowUpdater(wm,window,p)
         view.setOnTouchListener { _,e -> when(e.action) {
             MotionEvent.ACTION_DOWN -> {sx=e.rawX;sy=e.rawY;ox=p.x;oy=p.y}
-            MotionEvent.ACTION_MOVE -> {val (w,h)=app.runtime.size();p.x=(ox+e.rawX-sx).toInt().coerceIn(0,maxOf(0,w-dp(80)));p.y=(oy+e.rawY-sy).toInt().coerceIn(0,maxOf(0,h-dp(60)));updater.schedule()}
+            MotionEvent.ACTION_MOVE -> {val (w,h)=app.runtime.size();p.x=(ox+e.rawX-sx).toInt().coerceIn(0,maxOf(0,w-window.width.coerceAtLeast(dp(44))));p.y=(oy+e.rawY-sy).toInt().coerceIn(0,maxOf(0,h-window.height.coerceAtLeast(dp(44))));updater.schedule()}
             MotionEvent.ACTION_UP -> {updater.flush();if(kotlin.math.hypot(e.rawX-sx,e.rawY-sy)<dp(6))view.performClick()}
             MotionEvent.ACTION_CANCEL -> updater.flush()
         };true}
     }
     private fun canEdit():Boolean {
+        if(recordingBusy){toast("正在回放本次动作，请稍候");return false}
         if(app.engine.state.value.status in listOf(Status.RUNNING,Status.PAUSED)){toast("请先停止脚本再编辑或取点");return false};return true
     }
     private fun run() {
@@ -114,9 +117,9 @@ class OverlayController(private val service: RunnerService) {
     private fun refreshPointVisibility() {
         if(closed)return
         val idle=app.engine.state.value.status !in listOf(Status.RUNNING,Status.PAUSED)
-        val interactive=showMarkers && idle && marker==null && capture==null && editor==null
+        val interactive=showMarkers && idle && marker==null && capture==null && editor==null && !gestureInFlight
         handles.render(pointEntries,interactive)
-        numbered.visibility=if(showMarkers && !interactive)View.VISIBLE else View.INVISIBLE
+        numbered.visibility=if(showMarkers && !interactive && !recordingBusy && !gestureInFlight)View.VISIBLE else View.INVISIBLE
     }
     private fun updateMarkers(script:Script?) {
         markersJob?.cancel()
@@ -142,18 +145,18 @@ class OverlayController(private val service: RunnerService) {
             val draft=app.overlayDraft.create()
             val title=if(single)"单点连点"else"多点连点"
             val number=app.store.scripts.value.count {it.name.startsWith(title)}+1
-            app.overlayDraft.update(draft.copy(name="$title $number",meta=draft.meta.copy(repeatCount=100,minIntervalMs=200),steps=emptyList()))
-            toast("切到目标页面，点＋后点击屏幕创建编号点位")
+            app.overlayDraft.update(draft.copy(name="$title $number",meta=draft.meta.copy(repeatCount=if(single)100 else 1,minIntervalMs=if(single)200 else 500),steps=emptyList()))
+            toast("切到目标页面，点＋后直接点击或滑动；完成并保存")
         }
     }
     private fun addPoint(swipe:Boolean=false) {
         if(!canEdit() || recordingBusy)return
-        if(!swipe){record(replay=false);return}
+        if(!swipe){record();return}
         finishPicking();editor?.close();editor=null
         val script=app.overlayDraft.begin();val count=script.steps.count {it.type in listOf("click","longPress","swipe")}
         val point=Point((.5+(count%3-1)*.08).coerceIn(.1,.9),(.5+(count/3%3)*.08).coerceIn(.1,.9))
         val step=if(swipe)Step(nextId(),"swipe",from=listOf(point.x,.7),to=listOf(point.x,.3),note="滑动点位")else Step(nextId(),x=point.x,y=point.y,note="点击点位")
-        app.overlayDraft.update(script.copy(steps=script.steps+step));numbered.highlight=step.id
+        app.overlayDraft.update(PointRecording.append(script,step));numbered.highlight=step.id
     }
     private fun movePoint(id:String,point:Point,end:Boolean) {
         if(!canEdit())return
@@ -175,6 +178,7 @@ class OverlayController(private val service: RunnerService) {
         dialogs.menu(listOf(
             "新建单点连点" to {newQuick(true)},"新建多点连点" to {newQuick(false)},"加载已保存脚本" to {dialogs.select()},
             "添加滑动" to {addPoint(true)},"点选录制" to {record()},"准星取点" to {pick()},"步骤列表（高级）" to {edit()},
+            "仅标点（不操作页面）" to {record(replay=false)},
             "作废未保存修改" to {app.overlayDraft.discard();toast("未保存修改已作废")},"删除当前脚本" to {dialogs.deleteScript()},
             "显示/隐藏标记" to {showMarkers=!showMarkers;refreshPointVisibility()},
             "打开应用" to {service.startActivity(Intent(service,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))}
@@ -207,7 +211,7 @@ class OverlayController(private val service: RunnerService) {
                     try {
                         val target=app.runtime.reverse(point);val current=app.overlayDraft.current()?:error("未选择脚本")
                         val step=(original?:Step(nextId())).copy(x=point.x,y=point.y,target=target,fallback=point,note=original?.note?:target?.value?:"标定点")
-                        app.overlayDraft.update(current.copy(steps=if(original==null)current.steps+step else current.steps.map {if(it.id==step.id)step else it}))
+                        app.overlayDraft.update(if(original==null)PointRecording.append(current,step)else current.copy(steps=current.steps.map {if(it.id==step.id)step else it}))
                         numbered.highlight=step.id;hint.text=service.getString(R.string.step_marked,app.overlayDraft.current()?.steps?.indexOfFirst {it.id==step.id}?.plus(1)?:0)
                         if(original!=null){finishPicking();edit()}
                     }catch(e:CancellationException){throw e}catch(e:Exception){hint.text=e.message}
@@ -224,55 +228,101 @@ class OverlayController(private val service: RunnerService) {
     }
     fun record(replay:Boolean=true) {
         if(!canEdit() || recordingBusy)return
+        if(replay)app.runtime.healthy("")?.let {toast(it);return}
         finishPicking();editor?.close();editor=null;if(app.overlayDraft.current()==null)app.overlayDraft.create();panel.visibility=View.GONE
         val recordingScriptId=app.overlayDraft.current()?.id
-        val capturedIds=mutableListOf<String>()
+        data class Recorded(val before:Script,val after:Script,val id:String,val startedAt:Long)
+        val recorded=mutableListOf<Recorded>()
         val layer=object:TouchSurface(service){override fun onDraw(canvas:Canvas){canvas.drawColor(0x18000000)};override fun performClick():Boolean=super.performClick()}
-        var downX=0f;var downY=0f
-        var clickPoint:Point?=null
+        val captureParams=params(-1,-1)
+        val hint=DragLabel(service)
+        var downX=0f;var downY=0f;var downAt=0L;var validTouch=false
+        var pending:Step?=null
+        fun restoreCapture() {
+            if(capture===layer && !closed){captureParams.flags=captureParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv();captureParams.alpha=1f;layer.visibility=View.VISIBLE;wm.updateViewLayout(layer,captureParams)}
+        }
+        fun updateHint(){hint.text=service.getString(if(replay)R.string.recording_count else R.string.marking_count,recorded.size)}
         layer.setOnClickListener {
-            val point=clickPoint?:return@setOnClickListener
+            val step=pending?:return@setOnClickListener
             if(recordingBusy)return@setOnClickListener
-            recordingBusy=true;if(replay)layer.visibility=View.INVISIBLE
+            recordingBusy=true;refreshPointVisibility()
             scope.launch {
                 try {
-                    if(replay)delay(50)
                     require(app.overlayDraft.current()?.id==recordingScriptId){"录制脚本已切换，请重新开始"}
-                    val target=if(replay)app.runtime.reverse(point)else null;val step=Step(nextId(),x=point.x,y=point.y,target=target,fallback=point,note=target?.value?:"点击点位")
+                    if(replay)app.runtime.healthy("")?.let {error(it)}
                     val current=app.overlayDraft.current()?:error("未选择脚本")
-                    app.overlayDraft.update(current.copy(steps=current.steps+step));capturedIds+=step.id;numbered.highlight=step.id
-                    val ok=if(replay)app.runtime.gesture(point,null,50)else true
-                    toast("点位 ${app.overlayDraft.current()?.steps?.size} 已创建${if(ok)""else"，目标未收到回放"}")
+                    val startedAt=app.runtime.now();val last=recorded.lastOrNull()
+                    val updated=PointRecording.append(current,step,if(replay)last?.id else null,if(replay)last?.let {startedAt-it.startedAt} else null)
+                    app.overlayDraft.update(updated);recorded+=Recorded(current,updated,step.id,startedAt);numbered.highlight=step.id;updateHint()
+                    if(replay){
+                        captureParams.flags=captureParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;captureParams.alpha=0f;layer.visibility=View.INVISIBLE;wm.updateViewLayout(layer,captureParams)
+                        delay(80)
+                        require(capture===layer && app.overlayDraft.current()?.id==recordingScriptId){"录入已结束"}
+                        val from=if(step.type=="swipe")Point(step.from[0],step.from[1])else Point(step.x,step.y)
+                        val to=if(step.type=="swipe")Point(step.to[0],step.to[1])else null
+                        val ok=app.runtime.gesture(from,to,if(step.type=="swipe")step.durationMs else step.holdMs)
+                        app.store.log("recording","${step.id} ${step.type} replay=$ok")
+                        if(!ok)toast("已保留点位，但动作未完成；请检查页面或撤销此点")
+                    }
                 }catch(e:CancellationException){throw e}catch(e:Exception){toast(e.message?:"取点失败")}
-                finally {recordingBusy=false;if(capture===layer)layer.visibility=View.VISIBLE}
+                finally {recordingBusy=false;restoreCapture();refreshPointVisibility()}
             }
         }
         layer.setOnTouchListener {_,event -> when(event.actionMasked){
-            MotionEvent.ACTION_DOWN -> {downX=event.rawX;downY=event.rawY}
+            MotionEvent.ACTION_DOWN -> {downX=event.rawX;downY=event.rawY;downAt=app.runtime.now();validTouch=!recordingBusy}
+            MotionEvent.ACTION_POINTER_DOWN,MotionEvent.ACTION_CANCEL -> {validTouch=false;pending=null}
             MotionEvent.ACTION_UP -> {
-                if(!recordingBusy && kotlin.math.hypot(event.rawX-downX,event.rawY-downY)<dp(20)){
-                    clickPoint=normalized(event.rawX,event.rawY);layer.performClick()
-                }else if(!recordingBusy)toast("点选模式请轻点，拖动位置请切换准星")
+                if(validTouch && !recordingBusy){
+                    val from=normalized(downX,downY);val to=normalized(event.rawX,event.rawY);val duration=(app.runtime.now()-downAt).coerceIn(1,60000)
+                    pending=when {
+                        kotlin.math.hypot(event.rawX-downX,event.rawY-downY)>ViewConfiguration.get(service).scaledTouchSlop -> Step(nextId(),"swipe",from=listOf(from.x,from.y),to=listOf(to.x,to.y),durationMs=duration,note="录入滑动")
+                        replay && duration>=500 -> Step(nextId(),"longPress",x=to.x,y=to.y,holdMs=duration,note="录入长按")
+                        else -> Step(nextId(),x=to.x,y=to.y,holdMs=50,note=if(replay)"录入点击"else"点击点位")
+                    }
+                    layer.performClick()
+                }else if(recordingBusy)toast("动作回放中，请稍候再录入下一点")
+                validTouch=false
             }
         };true}
-        capture=layer;add(layer,params(-1,-1));refreshPointVisibility()
+        capture=layer;add(layer,captureParams);refreshPointVisibility()
         val controls=LinearLayout(service).apply {orientation=LinearLayout.VERTICAL;background=background(palette.surface);setPadding(dp(8),dp(4),dp(8),dp(4))}
-        controls.addView(TextView(service).apply {text=if(replay)"点选录制：创建编号并回放点击"else"点击屏幕创建点位 1、2、3…";textSize=12f;setTextColor(palette.text)})
+        hint.textSize=11f;hint.setPadding(0,dp(4),0,dp(4));controls.addView(hint);updateHint()
+        controls.addView(TextView(service).apply {setText(if(replay)R.string.recording_hint else R.string.marking_hint);textSize=11f;setTextColor(palette.text)})
         val row=LinearLayout(service);controls.addView(row)
         button(row,"撤销上一点"){
-            if(!recordingBusy)app.overlayDraft.current()?.let {s ->
-                val id=capturedIds.lastOrNull()
-                if(id==null)toast("本次录制还没有新点")
-                else {require(s.id==recordingScriptId){"脚本已切换"};app.overlayDraft.update(s.copy(steps=s.steps.filter {it.id!=id}));capturedIds.removeAt(capturedIds.lastIndex)}
+            if(!recordingBusy)app.overlayDraft.current()?.let {current ->
+                val last=recorded.lastOrNull()
+                if(last==null)toast("本次录入还没有新动作")
+                else {require(current==last.after){"脚本已在其他位置修改，请重新录入"};app.overlayDraft.update(last.before);recorded.removeAt(recorded.lastIndex);updateHint()}
             }
         }
-        if(replay)button(row,"准星模式"){pick()};button(row,"完成"){finishPicking()}
+        button(row,"完成并保存"){if(!recordingBusy){app.overlayDraft.commit();finishPicking();toast("整段脚本已保存；请回到起始页面再运行")}}
         val saveRow=LinearLayout(service);controls.addView(saveRow)
-        button(saveRow,"一键保存"){if(!recordingBusy){app.overlayDraft.commit();toast("脚本已保存")}}
         button(saveRow,"作废修改"){if(!recordingBusy){app.overlayDraft.discard();finishPicking();toast("未保存修改已作废")}}
-        if(replay)button(saveRow,"悬浮编辑"){if(!recordingBusy)edit()}
-        picker=controls;add(controls,params(-2,-2).apply {gravity=Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL;y=dp(40)})
+        val (screenWidth,screenHeight)=app.runtime.size();val controlsParams=params(dp(220),-2).apply {x=maxOf(0,screenWidth-dp(228));y=maxOf(0,screenHeight-dp(190))}
+        drag(hint,controlsParams,controls);picker=controls;add(controls,controlsParams);tintNativeTree(controls,palette)
+    }
+    /** Hide intersecting overlays, including non-touchable canvases, until dispatch completes. */
+    private fun allowGestureThroughControls(from:Point,to:Point?):(() -> Unit)? {
+        if(closed)return null
+        refreshPointVisibility()
+        val (w,h)=app.runtime.size();val end=to?:from
+        val path=RectF((minOf(from.x,end.x)*(w-1)).toFloat()-2,(minOf(from.y,end.y)*(h-1)).toFloat()-2,(maxOf(from.x,end.x)*(w-1)).toFloat()+2,(maxOf(from.y,end.y)*(h-1)).toFloat()+2)
+        val affected=views.filter {view ->
+            val parameters=view.layoutParams as? WindowManager.LayoutParams
+            if(view.visibility!=View.VISIBLE || parameters==null)false
+            else {val origin=IntArray(2);view.getLocationOnScreen(origin);RectF.intersects(path,RectF(origin[0].toFloat(),origin[1].toFloat(),(origin[0]+view.width).toFloat(),(origin[1]+view.height).toFloat()))}
+        }.map {view -> val parameters=view.layoutParams as WindowManager.LayoutParams; Triple(view,parameters,Pair(parameters.flags,parameters.alpha))}
+        if(affected.isEmpty())return null
+        gestureInFlight=true
+        refreshPointVisibility()
+        affected.forEach {(view,parameters,_) -> parameters.flags=parameters.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;parameters.alpha=0f;view.visibility=View.INVISIBLE;wm.updateViewLayout(view,parameters)}
+        return {
+            affected.forEach {(view,parameters,previous) -> if(!closed && view in views && view.isAttachedToWindow){parameters.flags=previous.first;parameters.alpha=previous.second;view.visibility=View.VISIBLE;runCatching{wm.updateViewLayout(view,parameters)}}}
+            gestureInFlight=false
+            refreshPointVisibility()
+        }
     }
     private fun finishPicking(){remove(marker);remove(picker);remove(capture);marker=null;picker=null;capture=null;panel.visibility=View.VISIBLE;refreshPointVisibility()}
-    fun close(){if(closed)return;closed=true;scope.cancel();dialogs.close();editor?.close();editor=null;handles.close();views.toList().forEach(::remove)}
+    fun close(){if(closed)return;closed=true;app.runtime.overlayGestureGate=null;scope.cancel();dialogs.close();editor?.close();editor=null;handles.close();views.toList().forEach(::remove)}
 }

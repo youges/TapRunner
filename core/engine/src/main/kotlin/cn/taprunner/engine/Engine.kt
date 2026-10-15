@@ -43,17 +43,20 @@ object Validator {
             if (st.type == "if") require(st.condition != null) { "条件不能为空" }
             if (st.type == "waitImage") { require(st.template.isNotBlank() && st.roi.size == 4); st.roi.forEach(::coord); require(st.roi[2] > st.roi[0] && st.roi[3] > st.roi[1]); require(st.threshold in .6..1.0) }
             if (st.type == "inputText") require(st.target != null)
-            (st.body + st.then + st.otherwise).forEach { require(it in ids) { "引用的步骤 $it 不存在" } }
+            st.childStepIds().forEach { require(it in ids) { "引用的步骤 $it 不存在" } }
             st.onError?.let { e ->
                 if (e is JsonPrimitive) require(e.content in setOf("abort", "skip")) { "未知失败策略" }
                 else { require(e is JsonObject); e["goto"]?.let { require(it.jsonPrimitive.content in ids) { "跳转目标不存在" } }; e["retry"]?.jsonObject?.let { require((it["times"]?.jsonPrimitive?.int ?: 0) in 1..10) } }
             }
         }
-        val active = mutableSetOf<String>(); val seen = mutableSetOf<String>()
-        fun visit(id: String, depth: Int) {
+        val active = mutableSetOf<String>(); val heights = mutableMapOf<String, Int>()
+        fun visit(id: String, depth: Int): Int {
             require(depth <= 5) { "嵌套不能超过 5 层" }; require(id !in active) { "步骤引用形成循环" }
-            if (id in seen) return
-            active += id; val st = ids.getValue(id); (st.body + st.then + st.otherwise).forEach { visit(it, depth + 1) }; active -= id; seen += id
+            heights[id]?.let { height -> require(depth + height <= 5) { "嵌套不能超过 5 层" }; return height }
+            active += id
+            val height = ids.getValue(id).childStepIds().maxOfOrNull { visit(it, depth + 1) + 1 } ?: 0
+            active -= id; heights[id] = height
+            return height
         }
         ids.keys.forEach { visit(it, 0) }
         // All goto cycles are rejected: explicit bounded loops are easier to inspect and stop.
@@ -79,7 +82,7 @@ class Engine(private val runtime: Runtime, private val scope: CoroutineScope) {
         script = s; stepsById=s.steps.associateBy {it.id}; paused = false; budget = 0; executions = 0; state.value = Progress(Status.RUNNING, message = s.name)
         job = scope.launch {
             try {
-                val owned = s.steps.flatMap { it.body + it.then + it.otherwise }.toSet()
+                val owned = s.steps.flatMap { it.childStepIds() }.toSet()
                 val rootSteps=s.steps.filter {it.id !in owned}.map {it.id}
                 repeat(s.meta.repeatCount){round ->
                     checkpoint()

@@ -1,4 +1,20 @@
 <resources>
+    <string name="record_test_entry">跨页面录入测试</string>
+    <string name="record_test_origin">跨页面录入 · 起始页</string>
+    <string name="record_test_detail">跨页面录入 · 详情页</string>
+    <string name="record_test_counts">进入 %1$d · 详情 %2$d · 返回 %3$d</string>
+    <string name="record_test_instruction">录入“进入条目 → 详情按钮 → 返回起始页”，完成并保存后，在起始页播放。详情页延迟 700 毫秒出现，用来检查是否保留等待时间。</string>
+    <string name="record_test_enter">进入条目</string>
+    <string name="record_test_confirm">详情按钮</string>
+    <string name="record_test_return">返回起始页</string>
+    <string name="record_test_reset">重置计数</string>
+    <string name="record_test_detail_hint">这个按钮只在详情页出现。</string>
+    <string name="record_test_not_confirmed">尚未点击详情按钮</string>
+    <string name="record_test_confirmed">详情按钮已接收 %1$d 次点击</string>
+    <string name="recording_count">录入中 · %1$d 个动作 · 可拖动</string>
+    <string name="marking_count">仅标点 · %1$d 个动作 · 可拖动</string>
+    <string name="recording_hint">点击、长按、滑动会操作页面；等待时间自动记入脚本。</string>
+    <string name="marking_hint">只标记位置，不操作页面。完成后保存。</string>
     <string name="point_handle">点位 %1$d · %2$s</string>
     <string name="step_number">%1$d</string>
     <string name="step_title">%1$s %2$s</string>

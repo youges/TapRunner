@@ -47,6 +47,7 @@ class TestActivity: ComponentActivity() {
             }.onFailure {measuringSwipe=false;Toast.makeText(this@TestActivity,it.message,Toast.LENGTH_LONG).show()}
         }})
         column.addView(Button(this).apply {setText(R.string.test_stop);setOnClickListener{app.engine.stop("测试台停止")}})
+        column.addView(Button(this).apply {setText(R.string.record_test_entry);setOnClickListener {startActivity(Intent(this@TestActivity,RecordingTestActivity::class.java))}})
         column.addView(Button(this).apply {setText(R.string.test_back);setOnClickListener{finish()}})
         column.addView(TextView(this).apply {setText(R.string.test_scroll_title);textSize=18f;setPadding(0,dp(18),0,dp(8))})
         repeat(24){index -> column.addView(TextView(this).apply {text=getString(R.string.test_scroll_row,index+1);textSize=15f;setPadding(dp(12),dp(14),dp(12),dp(14));setBackgroundColor(if(index%2==0)palette.surface else palette.raised)})}

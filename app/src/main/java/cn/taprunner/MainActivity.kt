@@ -158,7 +158,7 @@ class MainActivity: ComponentActivity() {
                     item("permission-battery") {val exempt=(getSystemService(POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(packageName);PermissionCard("后台与电池",exempt,"可在系统的电池优化列表中调整 TapRunner；不同厂商入口可能不同。") {safe {startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))}}}
                     item("vendor-help"){Text("若无障碍被系统关闭，请检查受限制设置、后台耗电管理和自启动。修改后重新开启对应服务；应用不会自动续跑。",style=MaterialTheme.typography.bodySmall,color=colors.onSurfaceVariant)}
                     item("tools"){Row {TextButton(onClick={logs=true}){Text("运行日志")};TextButton(onClick={startActivity(Intent(this@MainActivity,TestActivity::class.java))}){Text("真机测试台")}}}
-                    item("about"){Text("TapRunner 0.5.0 · 无广告 · 数据留在本机",style=MaterialTheme.typography.labelMedium,color=colors.onSurfaceVariant)}
+                    item("about"){Text("TapRunner ${BuildConfig.VERSION_NAME} · 无广告 · 数据留在本机",style=MaterialTheme.typography.labelMedium,color=colors.onSurfaceVariant)}
                 }
             }
         }

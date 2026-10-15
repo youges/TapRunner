@@ -20,6 +20,7 @@ import java.io.File
 import kotlin.coroutines.resume
 
 class AndroidRuntime(private val app: TapApp): Runtime {
+    var overlayGestureGate:((Point,Point?)->(() -> Unit)?)?=null
     var foregroundPkg = ""
     private var mismatchSince = 0L
     private var lastFrameAt = 0L
@@ -39,6 +40,9 @@ class AndroidRuntime(private val app: TapApp): Runtime {
     override suspend fun gesture(from: Point, to: Point?, duration: Long): Boolean {
         val svc = TapAccessibilityService.instance ?: return false
         val (w,h) = size(); val path = Path().apply { moveTo((from.x * (w-1)).toFloat(), (from.y * (h-1)).toFloat()); to?.let { lineTo((it.x * (w-1)).toFloat(), (it.y * (h-1)).toFloat()) } }
+        val restore=overlayGestureGate?.invoke(from,to)
+        try {
+        if(restore!=null)delay(80)
         return withTimeout(duration + 3000) { suspendCancellableCoroutine { cont ->
             val accepted = svc.dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, duration)).build(), object: AccessibilityService.GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) { if (cont.isActive) cont.resume(true) }
@@ -46,6 +50,7 @@ class AndroidRuntime(private val app: TapApp): Runtime {
             }, gestureHandler)
             if (!accepted && cont.isActive) cont.resume(false)
         } }
+        } finally {restore?.invoke()}
     }
     private fun matches(node: AccessibilityNodeInfo, target: Target): Boolean {
         if (!node.isVisibleToUser || !node.isEnabled) return false

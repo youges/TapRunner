@@ -20,8 +20,8 @@ gradle.taskGraph.whenReady {
 android {
     namespace = "cn.taprunner"
     compileSdk = 36
-    defaultConfig { applicationId = "cn.taprunner"; minSdk = 30; targetSdk = 36; versionCode = 11; versionName = "0.5.1" }
-    buildFeatures { compose = true }
+    defaultConfig { applicationId = "cn.taprunner"; minSdk = 30; targetSdk = 36; versionCode = 12; versionName = "0.6.0" }
+    buildFeatures { compose = true; buildConfig = true }
     signingConfigs {
         if(releaseSigning.isNotEmpty()) create("release") {
             storeFile=rootProject.file(releaseSigning.getProperty("storeFile"))
